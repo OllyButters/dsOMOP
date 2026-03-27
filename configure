@@ -3,11 +3,10 @@
 # Runs automatically during R CMD INSTALL on Unix systems.
 #
 # Ensures system libraries for R database driver compilation are present,
-# then pre-installs RMariaDB and odbc as binaries from Posit Package Manager
-# to avoid slow source compilation. These cover:
-#   - PostgreSQL (RPostgreSQL already in Rock base)
-#   - MySQL/MariaDB (RMariaDB)
-#   - SQL Server, Oracle, Redshift, Snowflake, Databricks, Spark (odbc)
+# then pre-installs database drivers and core R dependencies.
+#   - PostgreSQL: RPostgres (primary), RPostgreSQL (fallback)
+#   - MySQL/MariaDB: RMariaDB
+#   - SQL Server, Oracle, Redshift, Snowflake, Databricks, Spark: odbc
 
 LOG_PREFIX="[dsOMOP configure]"
 
@@ -26,25 +25,43 @@ if command -v apt-get >/dev/null 2>&1; then
   log_info "System dependencies ready."
 fi
 
-# Pre-install RMariaDB and odbc as binaries (avoids source compilation)
-log_info "Pre-installing R database drivers..."
+# Determine library path and package repo
+ROCK_LIB="/var/lib/rock/R/library"
+if [ ! -d "${ROCK_LIB}" ]; then
+  ROCK_LIB=""
+fi
+
 if [ -f /etc/os-release ]; then
   . /etc/os-release
 fi
 PPM_DISTRO="${VERSION_CODENAME:-noble}"
 PPM_REPO="https://packagemanager.posit.co/cran/__linux__/${PPM_DISTRO}/latest"
 
+# Install all R dependencies
+log_info "Installing R dependencies..."
 R --no-save --no-restore -e "
   repos <- c(PPM = '${PPM_REPO}', CRAN = 'https://cloud.r-project.org')
-  pkgs <- c('RMariaDB', 'odbc')
-  missing <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]
-  if (length(missing) > 0) {
-    cat('[dsOMOP configure] Installing:', paste(missing, collapse = ', '), '\n')
-    install.packages(missing, repos = repos, quiet = TRUE, type = 'both')
+  lib <- if (nzchar('${ROCK_LIB}')) '${ROCK_LIB}' else .libPaths()[1]
+
+  # Core: always needed
+  core <- c('DBI', 'R6', 'RPostgres', 'resourcer', 'jsonlite', 'arrow')
+  # Drivers: best-effort (not all deployments need all backends)
+  drivers <- c('RMariaDB', 'odbc', 'RSQLite')
+
+  for (pkg in c(core, drivers)) {
+    if (!requireNamespace(pkg, quietly = TRUE, lib.loc = lib)) {
+      cat('[dsOMOP configure] Installing', pkg, '...\n')
+      tryCatch(
+        install.packages(pkg, lib = lib, repos = repos, quiet = TRUE, type = 'both'),
+        error = function(e) cat('[dsOMOP configure] WARNING:', pkg, '-', e\$message, '\n')
+      )
+    }
   }
-  for (p in pkgs) {
-    v <- tryCatch(as.character(packageVersion(p)), error = function(e) 'FAILED')
-    cat(sprintf('[dsOMOP configure] %s: %s\n', p, v))
+
+  cat('[dsOMOP configure] Installed packages:\n')
+  for (pkg in c(core, drivers)) {
+    v <- tryCatch(as.character(packageVersion(pkg)), error = function(e) 'NOT AVAILABLE')
+    cat(sprintf('  %s: %s\n', pkg, v))
   }
 " 2>&1 | grep "dsOMOP configure" || true
 

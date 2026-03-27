@@ -22,21 +22,24 @@ Depends:
 Imports:
     DBI,
     R6,
+    RPostgres,
     resourcer,
+    jsonlite,
     methods,
     stats,
     utils,
-    arrow,
-    RMariaDB,
-    odbc
+    arrow
 Suggests:
-    RPostgres,
+    RMariaDB,
+    RPostgreSQL,
     RSQLite,
+    duckdb,
+    odbc,
+    bit64,
     bigrquery,
     testthat (>= 3.0.0),
     DSLite,
-    CommonDataModel,
-    jsonlite
+    CommonDataModel
 AggregateMethods:
     omopPingDS,
     omopGetCapabilitiesDS,
